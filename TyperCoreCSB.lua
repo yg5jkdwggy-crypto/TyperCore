@@ -163,7 +163,7 @@ TabCore:CreateToggle({
     end,
 })
 
--- NEW: CARL'S PRO MODE SWITCH (Disabled by default)
+-- CARL'S PRO MODE SWITCH (Instant Typing + Displays 250 WPM)
 TabCore:CreateToggle({
     Name = "Carl's Pro Mode (Insane WPM)",
     CurrentValue = false,
@@ -180,7 +180,7 @@ TabCore:CreateToggle({
             BackupConfigs.TypoChance = GlobalEngine.TypoChance
             BackupConfigs.LongWordHesitation = GlobalEngine.LongWordHesitation
 
-            -- Overwrite settings to match exact flawless frame performance seen in the spelling bee video
+            -- Overwrite settings to match instant execution frame performance
             GlobalEngine.StaticTyping = true
             GlobalEngine.StaticSpeed = 0.00
             GlobalEngine.AutoSubmit = true
@@ -189,7 +189,7 @@ TabCore:CreateToggle({
             GlobalEngine.TypoChance = 0
             GlobalEngine.LongWordHesitation = false
             
-            Rayfield:Notify({Title = "CARL'S PRO MODE", Content = "Maximum throughput active. Simulating instant typing.", Duration = 4})
+            Rayfield:Notify({Title = "CARL'S PRO MODE", Content = "Maximum throughput active. Instantly setting string data.", Duration = 4})
         else
             -- Revert back to original setup configs when turned off
             if BackupConfigs.StaticTyping ~= nil then
@@ -250,7 +250,7 @@ TabCore:CreateSlider({
     Name = "Dynamic: Max Input Latency Boundary",
     Range = {0.02, 1.0}, Increment = 0.01, Suffix = "s",
     CurrentValue = GlobalEngine.MaxSpeed, Flag = "MaxS",
-    Callback = function(Value) GlobalEngine.MaxSpeed = math.max(GlobalEngine.MinSpeed + 0.01, Value) end,
+    Callback = function(Value) GlobalEngine.MaxSpeed = math.max(GlobalEngine.MinSpeed + 0.01, Value) end
 })
 
 -- Anti-Paste & Bypass Configs
@@ -414,9 +414,17 @@ local function typeWord(targetText)
         end
     end
     
-    -- Carl's Pro Mode forces absolute instant execution bypass routing
+    -- Carl's Pro Mode or overrides instantly set the property
     if GlobalEngine.CarlsProMode or GlobalEngine.TextPropertyBypass or GlobalEngine.InstantTypeHotKey then
         targetTextBox.Text = targetText
+        
+        -- Override telemetry data calculation instantly for Carl's Pro Mode
+        if GlobalEngine.CarlsProMode and GlobalEngine.LiveWPMCounter and LabelWPM and LabelWPM.SetText then
+            -- Inject a slight random variation right around 250 WPM so it looks dynamic
+            local simulatedWPM = math.random(245, 255)
+            GlobalEngine.CurrentWPM = simulatedWPM
+            LabelWPM:SetText("WPM Tracker: " .. tostring(simulatedWPM) .. " WPM")
+        end
     else
         local currentOutputString = ""
         local cursorIndex = 1
@@ -473,30 +481,19 @@ local function typeWord(targetText)
                 
                 if activeCharacter == " " then
                     characterBaseDelay = characterBaseDelay + GlobalEngine.SpacebarLag
-                elseif string.match(activeCharacter, "[%p%s]") then
-                    characterBaseDelay = characterBaseDelay * GlobalEngine.PunctuationDelayMultiplier
                 end
                 
                 task.wait(characterBaseDelay)
-                
-                if GlobalEngine.BurstMode and cursorIndex % GlobalEngine.BurstFrequency == 0 and math.random(1, 100) < 35 then
-                    task.wait(math.random(GlobalEngine.BurstPauseMin * 100, GlobalEngine.BurstPauseMax * 100) / 100)
-                end
-                
-                if math.random(1, 100) <= GlobalEngine.MicroStutterChance then
-                    task.wait(math.random(0.05 * 100, GlobalEngine.MicroStutterMax * 100) / 100)
-                end
             else
                 -- STATIC SPEED MATH (No realism, just flat timing)
                 if GlobalEngine.StaticSpeed > 0 then
                     task.wait(GlobalEngine.StaticSpeed)
                 else
-                    -- Yield mitigation to prevent freezing when doing 0 delay
                     if cursorIndex % 20 == 0 then RunService.Heartbeat:Wait() end
                 end
             end
             
-            if GlobalEngine.LiveWPMCounter and cursorIndex % 3 == 0 and not GlobalEngine.StaticTyping then
+            if GlobalEngine.LiveWPMCounter and cursorIndex % 3 == 0 then
                 local dynamicElapsed = os.clock() - startTime
                 local calculatedWPM = math.floor((#currentOutputString / 5) / (dynamicElapsed / 60))
                 if calculatedWPM < 300 and LabelWPM and LabelWPM.SetText then
@@ -548,7 +545,7 @@ end
 local function onGuiChanged()
     if not GlobalEngine.EngineMasterSwitch then return end
     
-    -- CHANGED: If Carl's Pro Mode is enabled, bypass ScreenGui .Enabled check completely
+    -- If Carl's Pro Mode is enabled, bypass ScreenGui .Enabled check completely
     if GlobalEngine.CarlsProMode or (targetScreenGui and targetScreenGui.Enabled) then
         if not GlobalEngine.CarlsProMode then
             task.wait(GlobalEngine.LoopThrottleInterval)
@@ -611,16 +608,11 @@ local function setupGuiDetection()
     end)
 
     if not metatableSuccess then
-        -- Fallback event listener hook routine when running environments missing full metatable manipulation extensions
         local originalFireServer
         local hookSuccess, hookError = pcall(function()
             local remoteWrong = ReplicatedStorage:WaitForChild("SpelledWrongly", 2)
             if remoteWrong then
                 originalFireServer = remoteWrong.FireServer
-                local dynamicMeta = getmediatable and getmediatable(remoteWrong) or getrawmetatable(game)
-                if dynamicMeta and dynamicMeta.__index and dynamicMeta.__index.FireServer then
-                    -- Environment fallback hook assignment array blocks
-                end
             end
         end)
     end
