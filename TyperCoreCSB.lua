@@ -65,10 +65,11 @@ local GlobalEngine = {
     MaxWordLengthCap = 999,
     SkipWordsWithNumbers = false,
     SkipWordsWithPunctuation = false,
-    InstantTypeHotKey = false,
+    InstantTypeHotKey = false, -- Controlled by the new toggle and keybind
     InstantKeyBind = Enum.KeyCode.LeftControl,
     PanicKeyBind = Enum.KeyCode.RightShift,
     LoopThrottleInterval = 0.01, -- Minimized textbox detection time
+    EarlyGuiEnable = false, -- NEW: Bypasses targetScreenGui.Enabled conditions instantly
     
     -- Anti-Paste, Focus, & Anti-Cheat Detouring
     DisableAntiPaste = true,          
@@ -149,6 +150,9 @@ local LabelWPM = TabTelemetry:CreateLabel("WPM Tracker: Calculating...")
 local LabelWords = TabTelemetry:CreateLabel("Total Completed Data-Blocks: 0")
 local LabelTypos = TabTelemetry:CreateLabel("Total Simulated Corrections: 0")
 local LabelStatus = TabTelemetry:CreateLabel("Engine State: Idle")
+
+-- Forward declaring toggle variable so keybind can update it
+local InstantToggleElement = nil
 
 -- Control Interceptor Switch
 TabCore:CreateToggle({
@@ -310,11 +314,38 @@ TabAutomation:CreateToggle({
     Callback = function(Value) if not GlobalEngine.CarlsProMode then GlobalEngine.AutoSubmit = Value end end,
 })
 
+-- NEW FEATURE TOGGLE: Early GUI Enable
+TabAutomation:CreateToggle({
+    Name = "Early GUI Enable Bypass",
+    CurrentValue = GlobalEngine.EarlyGuiEnable,
+    Flag = "EarlyGuiEnable",
+    Callback = function(Value)
+        GlobalEngine.EarlyGuiEnable = Value
+    end,
+})
+
+-- NEW: Instant Type Toggle Option
+InstantToggleElement = TabAutomation:CreateToggle({
+    Name = "Enable Instant Finish Bypass",
+    CurrentValue = GlobalEngine.InstantTypeHotKey,
+    Flag = "InstantTypeToggle",
+    Callback = function(Value)
+        GlobalEngine.InstantTypeHotKey = Value
+    end,
+})
+
 -- Keybind Overrides
 TabAutomation:CreateKeybind({
     Name = "Instant Finish Bypass Key",
     CurrentKeybind = "LeftControl", HoldToInteract = false,
-    Callback = function() GlobalEngine.InstantTypeHotKey = not GlobalEngine.InstantTypeHotKey end,
+    Callback = function() 
+        local NewState = not GlobalEngine.InstantTypeHotKey
+        GlobalEngine.InstantTypeHotKey = NewState
+        -- Synchronize the toggle UI status element state safely
+        if InstantToggleElement and InstantToggleElement.Set then
+            InstantToggleElement:Set(NewState)
+        end
+    end,
 })
 TabAutomation:CreateKeybind({
     Name = "Emergency Pipeline Halt Key",
@@ -418,7 +449,10 @@ local function typeWord(targetText)
     
     if GlobalEngine.TextPropertyBypass or GlobalEngine.InstantTypeHotKey then
         targetTextBox.Text = targetText
-    else
+    end
+
+    -- Process character animations if instant features aren't forced over the text values
+    if not GlobalEngine.TextPropertyBypass and not GlobalEngine.InstantTypeHotKey then
         local currentOutputString = ""
         local cursorIndex = 1
         local startTime = os.clock()
@@ -523,10 +557,10 @@ local function typeWord(targetText)
     
     -- Exclude AutoSubmit execution here if CarlsProMode is on, since we manually fire immediately at the start of the function.
     if GlobalEngine.AutoSubmit and GlobalEngine.EngineMasterSwitch and not GlobalEngine.StopExecutionSignal and spelledCorrectlyEvent then
-        if not GlobalEngine.StaticTyping then
+        if not GlobalEngine.StaticTyping and not GlobalEngine.InstantTypeHotKey then
             task.wait(getGaussianDelay(GlobalEngine.SubmitDelayMin, GlobalEngine.SubmitDelayMax))
         end
-        if GlobalEngine.StaticTyping or math.random(1, 100) > GlobalEngine.SubmitFailChance then
+        if GlobalEngine.StaticTyping or GlobalEngine.InstantTypeHotKey or math.random(1, 100) > GlobalEngine.SubmitFailChance then
             spelledCorrectlyEvent:FireServer(targetText)
         end
     end
@@ -555,9 +589,9 @@ end
 function onGuiChanged()
     if not GlobalEngine.EngineMasterSwitch then return end
     
-    -- If Carl's Pro Mode is enabled, bypass ScreenGui .Enabled check completely
-    if GlobalEngine.CarlsProMode or (targetScreenGui and targetScreenGui.Enabled) then
-        if not GlobalEngine.CarlsProMode then
+    -- MODIFIED CHECK: Fire instantly if CarlsProMode OR EarlyGuiEnable is true, bypassing .Enabled validation
+    if GlobalEngine.CarlsProMode or GlobalEngine.EarlyGuiEnable or (targetScreenGui and targetScreenGui.Enabled) then
+        if not GlobalEngine.CarlsProMode and not GlobalEngine.EarlyGuiEnable then
             task.wait(GlobalEngine.LoopThrottleInterval)
         end
         
@@ -608,7 +642,8 @@ local function setupGuiDetection()
             if GlobalEngine.OnlyCorrectWords and method == "FireServer" then
                 if self.Name == "SpelledWrongly" then
                     return
-                elseif self.Name == "SpelledCorrectly" then
+                end
+                if self.Name == "SpelledCorrectly" then
                     return originalNamecall(self, unpack(args))
                 end
             end
