@@ -372,7 +372,7 @@ local function typeWord(targetText)
         local startTime = os.clock()
         
         while cursorIndex <= #targetText do
-            if not GlobalEngine.EngineMasterSwitch or GlobalEngine.StopExecutionSignal or not targetScreenGui or not targetScreenGui.Enabled then 
+            if not GlobalEngine.EngineMasterSwitch or GlobalEngine.StopExecutionSignal then 
                 break 
             end
             
@@ -578,4 +578,4 @@ local function setupGuiDetection()
 end
 
 setupGuiDetection()
-print("Script Loaded")
+print("[Engine Debug]: Boot Complete.")
