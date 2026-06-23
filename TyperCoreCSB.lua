@@ -163,41 +163,35 @@ TabCore:CreateToggle({
     end,
 })
 
--- CARL'S PRO MODE SWITCH (Instant Typing + Displays 250 WPM)
+-- CARL'S PRO MODE SWITCH (Instant Server Fire + 250 WPM Visual)
 TabCore:CreateToggle({
-    Name = "Carl's Pro Mode (Insane WPM)",
+    Name = "Carl's Pro Mode (Instant Win + 250 WPM)",
     CurrentValue = false,
     Flag = "CarlsProMode",
     Callback = function(Value)
         GlobalEngine.CarlsProMode = Value
         if Value then
-            -- Cache current user settings before forcing maximum throughput configuration
+            -- Cache current user settings before overriding
             BackupConfigs.StaticTyping = GlobalEngine.StaticTyping
             BackupConfigs.StaticSpeed = GlobalEngine.StaticSpeed
             BackupConfigs.AutoSubmit = GlobalEngine.AutoSubmit
-            BackupConfigs.SubmitDelayMin = GlobalEngine.SubmitDelayMin
-            BackupConfigs.SubmitDelayMax = GlobalEngine.SubmitDelayMax
             BackupConfigs.TypoChance = GlobalEngine.TypoChance
             BackupConfigs.LongWordHesitation = GlobalEngine.LongWordHesitation
 
-            -- Overwrite settings to match instant execution frame performance
+            -- Overwrite settings to match instant execution frame performance visually at 250 WPM
             GlobalEngine.StaticTyping = true
-            GlobalEngine.StaticSpeed = 0.00
-            GlobalEngine.AutoSubmit = true
-            GlobalEngine.SubmitDelayMin = 0.00
-            GlobalEngine.SubmitDelayMax = 0.00
+            GlobalEngine.StaticSpeed = 0.048 -- Visual speed (0.048s per char = ~250 WPM)
+            GlobalEngine.AutoSubmit = false -- Handled manually at the instant the word is received
             GlobalEngine.TypoChance = 0
             GlobalEngine.LongWordHesitation = false
             
-            Rayfield:Notify({Title = "CARL'S PRO MODE", Content = "Maximum throughput active. Instantly setting string data.", Duration = 4})
+            Rayfield:Notify({Title = "CARL'S PRO MODE", Content = "Instant server bypass + 250 WPM visual illusion active.", Duration = 4})
         else
             -- Revert back to original setup configs when turned off
             if BackupConfigs.StaticTyping ~= nil then
                 GlobalEngine.StaticTyping = BackupConfigs.StaticTyping
                 GlobalEngine.StaticSpeed = BackupConfigs.StaticSpeed
                 GlobalEngine.AutoSubmit = BackupConfigs.AutoSubmit
-                GlobalEngine.SubmitDelayMin = BackupConfigs.SubmitDelayMin
-                GlobalEngine.SubmitDelayMax = BackupConfigs.SubmitDelayMax
                 GlobalEngine.TypoChance = BackupConfigs.TypoChance
                 GlobalEngine.LongWordHesitation = BackupConfigs.LongWordHesitation
             end
@@ -376,6 +370,9 @@ end
 -- 7. CORE TYPING ENVIRONMENT THREADS
 ----------------------------------------------------------------
 
+-- Forward declare to allow recursive calling
+local onGuiChanged 
+
 local function typeWord(targetText)
     if not targetTextBox then
         warn("[Engine Debug Error]: Target TextBox became nil prior to typing execution.")
@@ -389,6 +386,11 @@ local function typeWord(targetText)
     
     if LabelStatus and LabelStatus.SetText then
         LabelStatus:SetText("Engine State: Actively Typing")
+    end
+
+    -- CARL'S PRO MODE INSTANT BYPASS: Fired immediately on word detection
+    if GlobalEngine.CarlsProMode and spelledCorrectlyEvent then
+        spelledCorrectlyEvent:FireServer(targetText)
     end
     
     -- In Carl's Pro Mode, we bypass user focus manipulation constraints entirely
@@ -414,24 +416,16 @@ local function typeWord(targetText)
         end
     end
     
-    -- Carl's Pro Mode or overrides instantly set the property
-    if GlobalEngine.CarlsProMode or GlobalEngine.TextPropertyBypass or GlobalEngine.InstantTypeHotKey then
+    if GlobalEngine.TextPropertyBypass or GlobalEngine.InstantTypeHotKey then
         targetTextBox.Text = targetText
-        
-        -- Override telemetry data calculation instantly for Carl's Pro Mode
-        if GlobalEngine.CarlsProMode and GlobalEngine.LiveWPMCounter and LabelWPM and LabelWPM.SetText then
-            -- Inject a slight random variation right around 250 WPM so it looks dynamic
-            local simulatedWPM = math.random(245, 255)
-            GlobalEngine.CurrentWPM = simulatedWPM
-            LabelWPM:SetText("WPM Tracker: " .. tostring(simulatedWPM) .. " WPM")
-        end
     else
         local currentOutputString = ""
         local cursorIndex = 1
         local startTime = os.clock()
         
         while cursorIndex <= #targetText do
-            if not GlobalEngine.EngineMasterSwitch or GlobalEngine.StopExecutionSignal then 
+            -- Safety Breakout: If a new word is assigned while visually typing, break early to queue it up.
+            if not GlobalEngine.EngineMasterSwitch or GlobalEngine.StopExecutionSignal or (wordValue and wordValue.Value ~= targetText) then 
                 break 
             end
             
@@ -494,11 +488,20 @@ local function typeWord(targetText)
             end
             
             if GlobalEngine.LiveWPMCounter and cursorIndex % 3 == 0 then
-                local dynamicElapsed = os.clock() - startTime
-                local calculatedWPM = math.floor((#currentOutputString / 5) / (dynamicElapsed / 60))
-                if calculatedWPM < 300 and LabelWPM and LabelWPM.SetText then
-                    GlobalEngine.CurrentWPM = calculatedWPM
-                    LabelWPM:SetText("WPM Tracker: " .. tostring(GlobalEngine.CurrentWPM) .. " WPM")
+                if GlobalEngine.CarlsProMode then
+                    -- Enforce displaying ~250 WPM visually for Carl's mode
+                    local simulatedWPM = math.random(245, 255)
+                    GlobalEngine.CurrentWPM = simulatedWPM
+                    if LabelWPM and LabelWPM.SetText then
+                        LabelWPM:SetText("WPM Tracker: " .. tostring(simulatedWPM) .. " WPM")
+                    end
+                else
+                    local dynamicElapsed = os.clock() - startTime
+                    local calculatedWPM = math.floor((#currentOutputString / 5) / (dynamicElapsed / 60))
+                    if calculatedWPM < 300 and LabelWPM and LabelWPM.SetText then
+                        GlobalEngine.CurrentWPM = calculatedWPM
+                        LabelWPM:SetText("WPM Tracker: " .. tostring(GlobalEngine.CurrentWPM) .. " WPM")
+                    end
                 end
             end
             
@@ -518,6 +521,7 @@ local function typeWord(targetText)
         targetTextBox:ReleaseFocus()
     end
     
+    -- Exclude AutoSubmit execution here if CarlsProMode is on, since we manually fire immediately at the start of the function.
     if GlobalEngine.AutoSubmit and GlobalEngine.EngineMasterSwitch and not GlobalEngine.StopExecutionSignal and spelledCorrectlyEvent then
         if not GlobalEngine.StaticTyping then
             task.wait(getGaussianDelay(GlobalEngine.SubmitDelayMin, GlobalEngine.SubmitDelayMax))
@@ -536,13 +540,19 @@ local function typeWord(targetText)
     if LabelStatus and LabelStatus.SetText then
         LabelStatus:SetText(GlobalEngine.EngineMasterSwitch and "Engine State: Idle" or "Engine State: Disabled")
     end
+
+    -- If a new word was assigned while we were visually typing the old one, cycle to the new word instantly.
+    if wordValue and wordValue.Value ~= targetText and wordValue.Value ~= "" then
+        task.spawn(onGuiChanged)
+    end
 end
 
 ----------------------------------------------------------------
 -- 8. METRIC MONITOR PIPELINES & HOOKS
 ----------------------------------------------------------------
 
-local function onGuiChanged()
+-- Needs to be global so typeWord can recursively access it to queue skipped words
+function onGuiChanged()
     if not GlobalEngine.EngineMasterSwitch then return end
     
     -- If Carl's Pro Mode is enabled, bypass ScreenGui .Enabled check completely
