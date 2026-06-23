@@ -24,6 +24,7 @@ end
 local GlobalEngine = {
     -- Mode Management
     StaticTyping = false, -- false = Dynamic (Realistic), true = Static (No delays, no realism)
+    CarlsProMode = false, -- NEW: Lock parameters to match the video clip's insane WPM
 
     -- Core Speeds
     MinSpeed = 0.05,
@@ -101,6 +102,9 @@ local GlobalEngine = {
     OnlyCorrectWords = false,
 }
 
+-- For reverting back when Carl's Pro Mode is disabled
+local BackupConfigs = {}
+
 -- 3. INTERACTIVE CORRECTION KEYMAPS
 local KeyNeighbors = {
     a = "qwsz", b = "vghn", c = "xdfv", d = "ersfxc", e = "wsdr", f = "rtgvcd",
@@ -159,6 +163,48 @@ TabCore:CreateToggle({
     end,
 })
 
+-- NEW: CARL'S PRO MODE SWITCH (Disabled by default)
+TabCore:CreateToggle({
+    Name = "Carl's Pro Mode (Insane WPM)",
+    CurrentValue = false,
+    Flag = "CarlsProMode",
+    Callback = function(Value)
+        GlobalEngine.CarlsProMode = Value
+        if Value then
+            -- Cache current user settings before forcing maximum throughput configuration
+            BackupConfigs.StaticTyping = GlobalEngine.StaticTyping
+            BackupConfigs.StaticSpeed = GlobalEngine.StaticSpeed
+            BackupConfigs.AutoSubmit = GlobalEngine.AutoSubmit
+            BackupConfigs.SubmitDelayMin = GlobalEngine.SubmitDelayMin
+            BackupConfigs.SubmitDelayMax = GlobalEngine.SubmitDelayMax
+            BackupConfigs.TypoChance = GlobalEngine.TypoChance
+            BackupConfigs.LongWordHesitation = GlobalEngine.LongWordHesitation
+
+            -- Overwrite settings to match exact flawless frame performance seen in the spelling bee video
+            GlobalEngine.StaticTyping = true
+            GlobalEngine.StaticSpeed = 0.00
+            GlobalEngine.AutoSubmit = true
+            GlobalEngine.SubmitDelayMin = 0.00
+            GlobalEngine.SubmitDelayMax = 0.00
+            GlobalEngine.TypoChance = 0
+            GlobalEngine.LongWordHesitation = false
+            
+            Rayfield:Notify({Title = "CARL'S PRO MODE", Content = "Maximum throughput active. Simulating instant typing.", Duration = 4})
+        else
+            -- Revert back to original setup configs when turned off
+            if BackupConfigs.StaticTyping ~= nil then
+                GlobalEngine.StaticTyping = BackupConfigs.StaticTyping
+                GlobalEngine.StaticSpeed = BackupConfigs.StaticSpeed
+                GlobalEngine.AutoSubmit = BackupConfigs.AutoSubmit
+                GlobalEngine.SubmitDelayMin = BackupConfigs.SubmitDelayMin
+                GlobalEngine.SubmitDelayMax = BackupConfigs.SubmitDelayMax
+                GlobalEngine.TypoChance = BackupConfigs.TypoChance
+                GlobalEngine.LongWordHesitation = BackupConfigs.LongWordHesitation
+            end
+        end
+    end,
+})
+
 -- Typing Realism Mode Selector
 TabCore:CreateDropdown({
     Name = "Typing Realism Profile",
@@ -167,6 +213,7 @@ TabCore:CreateDropdown({
     MultipleOptions = false,
     Flag = "TypingProfile",
     Callback = function(Option)
+        if GlobalEngine.CarlsProMode then return end
         if Option[1] == "Static (Not Realistic)" then
             GlobalEngine.StaticTyping = true
             print("[Engine Debug]: Static Mode Activated (Zero delays, raw throughput).")
@@ -182,7 +229,7 @@ TabCore:CreateSlider({
     Name = "Static Typing Latency (Speed)",
     Range = {0.00, 0.50}, Increment = 0.01, Suffix = "s",
     CurrentValue = GlobalEngine.StaticSpeed, Flag = "StaticSpeed",
-    Callback = function(Value) GlobalEngine.StaticSpeed = Value end,
+    Callback = function(Value) if not GlobalEngine.CarlsProMode then GlobalEngine.StaticSpeed = Value end end,
 })
 
 TabCore:CreateSlider({
@@ -241,7 +288,7 @@ TabTypos:CreateSlider({
     Name = "Base Typo Factor Rate",
     Range = {0, 100}, Increment = 1, Suffix = "%",
     CurrentValue = GlobalEngine.TypoChance, Flag = "TypoChance",
-    Callback = function(Value) GlobalEngine.TypoChance = Value end,
+    Callback = function(Value) if not GlobalEngine.CarlsProMode then GlobalEngine.TypoChance = Value end end,
 })
 TabTypos:CreateSlider({
     Name = "Double Strike Propensity",
@@ -266,7 +313,7 @@ TabBehavior:CreateToggle({
 TabAutomation:CreateToggle({
     Name = "Auto-Fire Replicated Remote Validation",
     CurrentValue = GlobalEngine.AutoSubmit, Flag = "AutoSub",
-    Callback = function(Value) GlobalEngine.AutoSubmit = Value end,
+    Callback = function(Value) if not GlobalEngine.CarlsProMode then GlobalEngine.AutoSubmit = Value end end,
 })
 
 -- Keybind Overrides
@@ -344,27 +391,31 @@ local function typeWord(targetText)
         LabelStatus:SetText("Engine State: Actively Typing")
     end
     
-    if GlobalEngine.ForceKeepFocus and not focusLossConnection then
-        focusLossConnection = targetTextBox.FocusLost:Connect(function(enterPressed)
-            if GlobalEngine.IsCurrentlyTyping and not enterPressed then
-                task.wait()
-                if GlobalEngine.EngineMasterSwitch then targetTextBox:CaptureFocus() end
-            end
-        end)
+    -- In Carl's Pro Mode, we bypass user focus manipulation constraints entirely
+    if not GlobalEngine.CarlsProMode then
+        if GlobalEngine.ForceKeepFocus and not focusLossConnection then
+            focusLossConnection = targetTextBox.FocusLost:Connect(function(enterPressed)
+                if GlobalEngine.IsCurrentlyTyping and not enterPressed then
+                    task.wait()
+                    if GlobalEngine.EngineMasterSwitch then targetTextBox:CaptureFocus() end
+                end
+            end)
+        end
+        
+        if GlobalEngine.HumanFocusSimulation and not GlobalEngine.StaticTyping then
+            task.wait(GlobalEngine.FocusGainDelay)
+            targetTextBox:CaptureFocus()
+        else
+            targetTextBox:CaptureFocus()
+        end
+        
+        if GlobalEngine.LongWordHesitation and #targetText > 8 and not GlobalEngine.StaticTyping then
+            task.wait(getGaussianDelay(0.18, 0.45))
+        end
     end
     
-    if GlobalEngine.HumanFocusSimulation and not GlobalEngine.StaticTyping then
-        task.wait(GlobalEngine.FocusGainDelay)
-        targetTextBox:CaptureFocus()
-    else
-        targetTextBox:CaptureFocus()
-    end
-    
-    if GlobalEngine.LongWordHesitation and #targetText > 8 and not GlobalEngine.StaticTyping then
-        task.wait(getGaussianDelay(0.18, 0.45))
-    end
-    
-    if GlobalEngine.TextPropertyBypass or GlobalEngine.InstantTypeHotKey then
+    -- Carl's Pro Mode forces absolute instant execution bypass routing
+    if GlobalEngine.CarlsProMode or GlobalEngine.TextPropertyBypass or GlobalEngine.InstantTypeHotKey then
         targetTextBox.Text = targetText
     else
         local currentOutputString = ""
@@ -463,10 +514,12 @@ local function typeWord(targetText)
         focusLossConnection = nil
     end
     
-    if GlobalEngine.HumanFocusSimulation and not GlobalEngine.StaticTyping then
-        task.wait(GlobalEngine.FocusLossDelay)
+    if not GlobalEngine.CarlsProMode then
+        if GlobalEngine.HumanFocusSimulation and not GlobalEngine.StaticTyping then
+            task.wait(GlobalEngine.FocusLossDelay)
+        end
+        targetTextBox:ReleaseFocus()
     end
-    targetTextBox:ReleaseFocus()
     
     if GlobalEngine.AutoSubmit and GlobalEngine.EngineMasterSwitch and not GlobalEngine.StopExecutionSignal and spelledCorrectlyEvent then
         if not GlobalEngine.StaticTyping then
@@ -495,8 +548,12 @@ end
 local function onGuiChanged()
     if not GlobalEngine.EngineMasterSwitch then return end
     
-    if targetScreenGui and targetScreenGui.Enabled then
-        task.wait(GlobalEngine.LoopThrottleInterval)
+    -- CHANGED: If Carl's Pro Mode is enabled, bypass ScreenGui .Enabled check completely
+    if GlobalEngine.CarlsProMode or (targetScreenGui and targetScreenGui.Enabled) then
+        if not GlobalEngine.CarlsProMode then
+            task.wait(GlobalEngine.LoopThrottleInterval)
+        end
+        
         if not wordValue then return end
         local inputTargetWord = wordValue.Value
         
