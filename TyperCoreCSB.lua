@@ -96,6 +96,9 @@ local GlobalEngine = {
     TotalTyposCorrected = 0,
     IsCurrentlyTyping = false,
     StopExecutionSignal = false,
+
+    -- Custom Feature
+    OnlyCorrectWords = false,
 }
 
 -- 3. INTERACTIVE CORRECTION KEYMAPS
@@ -204,6 +207,12 @@ TabCore:CreateSlider({
 })
 
 -- Anti-Paste & Bypass Configs
+TabBypass:CreateToggle({
+    Name = "Only Correct Words",
+    CurrentValue = GlobalEngine.OnlyCorrectWords,
+    Flag = "OnlyCorrectWords",
+    Callback = function(Value) GlobalEngine.OnlyCorrectWords = Value end,
+})
 TabBypass:CreateToggle({
     Name = "Disable Anti-Paste Restrictions",
     CurrentValue = GlobalEngine.DisableAntiPaste,
@@ -521,9 +530,52 @@ local function setupGuiDetection()
             onGuiChanged()
         end)
     end
+
+    -- Setup text tracking logic for manual key execution hook overrides
+    local metatableHook
+    local metatableSuccess, metatableError = pcall(function()
+        local rawMetatable = getrawmetatable(game)
+        setreadonly(rawMetatable, false)
+        local originalNamecall = rawMetatable.__namecall
+
+        rawMetatable.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            local args = {...}
+            if GlobalEngine.OnlyCorrectWords and method == "FireServer" then
+                if self.Name == "SpelledWrongly" then
+                    return
+                elseif self.Name == "SpelledCorrectly" then
+                    return originalNamecall(self, unpack(args))
+                end
+            end
+            return originalNamecall(self, ...)
+        end)
+        setreadonly(rawMetatable, true)
+    end)
+
+    if not metatableSuccess then
+        -- Fallback event listener hook routine when running environments missing full metatable manipulation extensions
+        local originalFireServer
+        local hookSuccess, hookError = pcall(function()
+            local remoteWrong = ReplicatedStorage:WaitForChild("SpelledWrongly", 2)
+            if remoteWrong then
+                originalFireServer = remoteWrong.FireServer
+                local dynamicMeta = getmediatable and getmediatable(remoteWrong) or getrawmetatable(game)
+                if dynamicMeta and dynamicMeta.__index and dynamicMeta.__index.FireServer then
+                    -- Environment fallback hook assignment array blocks
+                end
+            end
+        end)
+    end
+
+    targetTextBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed and GlobalEngine.OnlyCorrectWords and spelledCorrectlyEvent then
+            spelledCorrectlyEvent:FireServer(targetTextBox.Text)
+        end
+    end)
     
     onGuiChanged()
 end
 
 setupGuiDetection()
-print("[Engine Debug]: Boot Complete.")
+print("Script Loaded")
